@@ -9,6 +9,7 @@ package web
 import (
 	"embed"
 	"errors"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -25,7 +26,14 @@ var templateFS embed.FS
 // Server serves the dashboard.
 type Server struct {
 	store store.Store
-	tmpl  *template.Template
+	// pages holds one template set per page.
+	//
+	// They cannot share a set: each page file defines a template called
+	// "content", and within a single set the last definition parsed wins --
+	// so every page would render whichever one happened to be parsed last.
+	// Parsing each page together with the layout keeps its own "content"
+	// scoped to it.
+	pages map[string]*template.Template
 	log   *slog.Logger
 	// token guards mutating actions. Empty disables them, leaving a
 	// read-only dashboard rather than an open one.
@@ -37,11 +45,16 @@ func New(st store.Store, adminToken string, log *slog.Logger) (*Server, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	tmpl, err := template.New("").Funcs(funcs()).ParseFS(templateFS, "templates/*.html")
-	if err != nil {
-		return nil, err
+	pages := map[string]*template.Template{}
+	for _, page := range []string{"index.html", "detail.html", "history.html"} {
+		t, err := template.New(page).Funcs(funcs()).ParseFS(
+			templateFS, "templates/layout.html", "templates/"+page)
+		if err != nil {
+			return nil, fmt.Errorf("web: parse %s: %w", page, err)
+		}
+		pages[page] = t
 	}
-	return &Server{store: st, tmpl: tmpl, log: log, token: adminToken}, nil
+	return &Server{store: st, pages: pages, log: log, token: adminToken}, nil
 }
 
 // Mount registers the dashboard routes on mux.
@@ -163,7 +176,15 @@ func (s *Server) render(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Content-Security-Policy",
 		"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'")
-	if err := s.tmpl.ExecuteTemplate(w, name, data); err != nil {
+	t, ok := s.pages[name]
+	if !ok {
+		s.log.Error("render: unknown page", "template", name)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	// Each page file ends with {{ template "layout" . }}, so executing the
+	// file's own template renders the whole document.
+	if err := t.ExecuteTemplate(w, name, data); err != nil {
 		s.log.Error("render", "template", name, "err", err)
 	}
 }
