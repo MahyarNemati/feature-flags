@@ -1,6 +1,10 @@
 /bin/
 coverage.out
 .DS_Store
-flagd
-flagd.pid
-stream.log
+
+# Leading slashes matter: a bare "flagd" also matches the cmd/flagd
+# *directory*, which silently excluded the entire entrypoint from the
+# repository and made CI fail with "cmd/flagd: directory not found".
+/flagd
+/flagd.pid
+/stream.log
