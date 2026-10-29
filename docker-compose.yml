@@ -1,0 +1,13 @@
+services:
+  flagd:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # Both must be at least 16 characters, and at least one must be set or
+      # flagd refuses to start rather than running unauthenticated.
+      FLAGD_ADMIN_TOKEN: "change-me-admin-token-16+"
+      FLAGD_SDK_TOKEN: "change-me-sdk-token-16+++"
+      FLAGD_LOG_FORMAT: "text"
+    command: ["-seed", "/etc/flagd/flags.example.json"]
+    restart: unless-stopped

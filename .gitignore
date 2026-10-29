@@ -1,0 +1,6 @@
+/bin/
+coverage.out
+.DS_Store
+flagd
+flagd.pid
+stream.log

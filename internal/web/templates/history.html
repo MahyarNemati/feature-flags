@@ -1,0 +1,19 @@
+{{ define "content" }}
+  <div class="card">
+    <table>
+      <tr><th>When</th><th>Flag</th><th>Action</th><th>Actor</th><th>Comment</th></tr>
+      {{ range .Changes }}
+        <tr>
+          <td title="{{ stamp .At }}">{{ ago .At }}</td>
+          <td><a href="/flags/{{ .FlagKey }}"><code>{{ .FlagKey }}</code></a></td>
+          <td>{{ .Action }}</td>
+          <td>{{ .Actor }}</td>
+          <td>{{ .Comment }}</td>
+        </tr>
+      {{ else }}
+        <tr><td colspan="5" class="empty">No changes recorded.</td></tr>
+      {{ end }}
+    </table>
+  </div>
+{{ end }}
+{{ template "layout" . }}

@@ -1,0 +1,47 @@
+{{ define "content" }}
+  <div class="card">
+    {{ range .Flags }}
+      <div class="row">
+        <div>
+          <a href="/flags/{{ .Key }}"><code>{{ .Key }}</code></a>
+          {{ if .Name }}<span class="desc">{{ .Name }}</span>{{ end }}
+          {{ if .Description }}<div class="desc">{{ .Description }}</div>{{ end }}
+        </div>
+        {{ if .Enabled }}<span class="pill on">on</span>
+        {{ else }}<span class="pill off">off</span>{{ end }}
+        <span class="pill">{{ .Kind }}</span>
+        {{ if .Rules }}<span class="pill">{{ len .Rules }} rule{{ if ne (len .Rules) 1 }}s{{ end }}</span>{{ end }}
+        {{ if .Archived }}<span class="pill">archived</span>{{ end }}
+        <span class="meta">v{{ .Version }} · {{ ago .UpdatedAt }}</span>
+      </div>
+    {{ else }}
+      <div class="empty">No flags yet. Create one with
+        <code>POST /api/v1/flags</code>.</div>
+    {{ end }}
+  </div>
+
+  {{ if not .Archived }}
+    <p class="note"><a class="back" href="/?archived=true">Show archived flags</a></p>
+  {{ else }}
+    <p class="note"><a class="back" href="/">Hide archived flags</a></p>
+  {{ end }}
+
+  {{ if .Changes }}
+    <h2>Recent changes</h2>
+    <div class="card">
+      <table>
+        <tr><th>When</th><th>Flag</th><th>Action</th><th>Actor</th><th>Comment</th></tr>
+        {{ range .Changes }}
+          <tr>
+            <td>{{ ago .At }}</td>
+            <td><a href="/flags/{{ .FlagKey }}"><code>{{ .FlagKey }}</code></a></td>
+            <td>{{ .Action }}</td>
+            <td>{{ .Actor }}</td>
+            <td>{{ .Comment }}</td>
+          </tr>
+        {{ end }}
+      </table>
+    </div>
+  {{ end }}
+{{ end }}
+{{ template "layout" . }}

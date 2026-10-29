@@ -1,0 +1,72 @@
+{{ define "layout" }}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ .Title }} — feature flags</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#fff; --border:#e3e6ea; --text:#15181d; --muted:#6b7280;
+    --on:#10b981; --off:#9aa1ad; --accent:#2f6fed; --danger:#e5484d; --radius:10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#0d0f12; --card:#16191e; --border:#272b33; --text:#eceef1; --muted:#949cab;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:36px 16px 72px}
+  header{display:flex;align-items:baseline;gap:16px;margin-bottom:28px;flex-wrap:wrap}
+  h1{font-size:1.2rem;margin:0;font-weight:650}
+  nav{margin-left:auto;display:flex;gap:14px;font-size:.875rem}
+  nav a{color:var(--muted);text-decoration:none}
+  nav a:hover{color:var(--text)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+  .row{padding:14px 18px;border-top:1px solid var(--border);display:flex;align-items:center;gap:12px}
+  .row:first-child{border-top:0}
+  .row a{color:inherit;text-decoration:none;font-weight:600}
+  .row a:hover{text-decoration:underline}
+  .pill{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;padding:2px 8px;
+    border-radius:999px;border:1px solid var(--border);color:var(--muted)}
+  .pill.on{color:#fff;background:var(--on);border-color:var(--on)}
+  .pill.off{color:#fff;background:var(--off);border-color:var(--off)}
+  .meta{margin-left:auto;font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
+  .desc{font-size:.85rem;color:var(--muted);margin-top:2px}
+  h2{font-size:.76rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);
+    margin:30px 0 10px;font-weight:650}
+  table{width:100%;border-collapse:collapse;font-size:.875rem}
+  th,td{text-align:left;padding:9px 18px;border-top:1px solid var(--border);vertical-align:top}
+  th{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:650}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem}
+  button{font:inherit;font-weight:600;padding:8px 14px;border-radius:8px;cursor:pointer;
+    border:1px solid var(--border);background:var(--card);color:var(--text)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.danger{background:var(--danger);border-color:var(--danger);color:#fff}
+  form.inline{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  input[type=text]{font:inherit;padding:8px 10px;border:1px solid var(--border);
+    border-radius:8px;background:var(--bg);color:var(--text);min-width:220px}
+  .empty{padding:18px;color:var(--muted)}
+  .note{font-size:.8rem;color:var(--muted);margin-top:10px}
+  .back{font-size:.85rem;color:var(--muted);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><a href="/" style="color:inherit;text-decoration:none">feature flags</a></h1>
+    <nav>
+      <a href="/">Flags</a>
+      <a href="/history">History</a>
+      <a href="/api/v1/flags">API</a>
+    </nav>
+  </header>
+  {{ template "content" . }}
+  {{ if .ReadOnly }}
+    <p class="note">Read-only: no admin token is configured, so flags cannot be
+    toggled from here.</p>
+  {{ end }}
+</div>
+</body>
+</html>{{ end }}

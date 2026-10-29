@@ -1,0 +1,106 @@
+{{ define "content" }}
+  {{ with .Flag }}
+    <p><a class="back" href="/">← all flags</a></p>
+
+    <div class="card">
+      <div class="row">
+        <div>
+          <code style="font-weight:600">{{ .Key }}</code>
+          {{ if .Description }}<div class="desc">{{ .Description }}</div>{{ end }}
+        </div>
+        {{ if .Enabled }}<span class="pill on">on</span>
+        {{ else }}<span class="pill off">off</span>{{ end }}
+        <span class="pill">{{ .Kind }}</span>
+        <span class="meta">v{{ .Version }}</span>
+      </div>
+
+      {{ if not $.ReadOnly }}
+        <div class="row">
+          <form class="inline" method="post" action="/flags/{{ .Key }}/toggle">
+            <input type="hidden" name="version" value="{{ .Version }}">
+            <input type="text" name="comment" placeholder="Why? (recorded in the audit log)">
+            <input type="hidden" name="token" value="">
+            {{ if .Enabled }}
+              <button class="danger" type="submit">Turn off</button>
+            {{ else }}
+              <button class="primary" type="submit">Turn on</button>
+            {{ end }}
+          </form>
+        </div>
+        <div class="row">
+          <span class="desc">Paste the admin token into the hidden field, or use
+          <code>PUT /api/v1/flags/{{ .Key }}</code>. The dashboard deliberately
+          has no session of its own; put real authentication in front of it.</span>
+        </div>
+      {{ end }}
+    </div>
+
+    <h2>Variations</h2>
+    <div class="card">
+      <table>
+        <tr><th>Key</th><th>Value</th><th>Role</th></tr>
+        {{ $f := . }}
+        {{ range .Variations }}
+          <tr>
+            <td><code>{{ .Key }}</code></td>
+            <td><code>{{ value .Value }}</code></td>
+            <td>
+              {{ if eq .Key $f.DefaultVariation }}<span class="pill">default</span>{{ end }}
+              {{ if eq .Key $f.OffVariation }}<span class="pill">off</span>{{ end }}
+            </td>
+          </tr>
+        {{ end }}
+      </table>
+    </div>
+
+    <h2>Targeting rules</h2>
+    <div class="card">
+      {{ range .Rules }}
+        <div class="row" style="display:block">
+          <div><code>{{ .ID }}</code>
+            {{ if .Description }}<span class="desc">— {{ .Description }}</span>{{ end }}
+          </div>
+          <div class="desc" style="margin-top:6px">
+            {{ range $i, $c := .Conditions }}
+              {{ if $i }}<strong> and </strong>{{ end }}
+              <code>{{ $c.Attribute }}</code>
+              {{ if $c.Negate }}<em>not</em>{{ end }}
+              <code>{{ $c.Operator }}</code>
+              {{ if $c.Values }}<code>{{ $c.Values }}</code>{{ end }}
+            {{ end }}
+          </div>
+          <div class="desc" style="margin-top:6px">
+            {{ if .Rollout }}
+              serves
+              {{ range $k, $w := .Rollout.Weights }}<code>{{ $k }}</code> {{ pct $w }}&nbsp;{{ end }}
+              {{ if .Rollout.BucketBy }}(bucketed by <code>{{ .Rollout.BucketBy }}</code>){{ end }}
+            {{ else }}
+              serves <code>{{ .Variation }}</code>
+            {{ end }}
+          </div>
+        </div>
+      {{ else }}
+        <div class="empty">No targeting rules; every subject gets
+          <code>{{ .DefaultVariation }}</code>.</div>
+      {{ end }}
+    </div>
+  {{ end }}
+
+  <h2>Change history</h2>
+  <div class="card">
+    <table>
+      <tr><th>When</th><th>Action</th><th>Actor</th><th>Comment</th></tr>
+      {{ range .Changes }}
+        <tr>
+          <td title="{{ stamp .At }}">{{ ago .At }}</td>
+          <td>{{ .Action }}</td>
+          <td>{{ .Actor }}</td>
+          <td>{{ .Comment }}</td>
+        </tr>
+      {{ else }}
+        <tr><td colspan="4" class="empty">No changes recorded.</td></tr>
+      {{ end }}
+    </table>
+  </div>
+{{ end }}
+{{ template "layout" . }}

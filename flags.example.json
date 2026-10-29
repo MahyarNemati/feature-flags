@@ -1,0 +1,126 @@
+[
+  {
+    "key": "new-checkout",
+    "name": "New checkout flow",
+    "description": "Rebuilt checkout. Ramping gradually; kill switch is the enabled field.",
+    "kind": "bool",
+    "enabled": true,
+    "tags": ["checkout", "ramp"],
+    "variations": [
+      { "key": "on", "value": true, "description": "new flow" },
+      { "key": "off", "value": false, "description": "legacy flow" }
+    ],
+    "default_variation": "off",
+    "off_variation": "off",
+    "rules": [
+      {
+        "id": "internal-staff",
+        "description": "Staff always see the new flow, so they dogfood it",
+        "conditions": [
+          { "attribute": "email", "operator": "ends_with", "values": ["@acme.com"] }
+        ],
+        "variation": "on"
+      },
+      {
+        "id": "ramp-uk",
+        "description": "10% of UK traffic, bucketed by account so a whole team sees the same thing",
+        "conditions": [
+          { "attribute": "country", "operator": "in", "values": ["GB", "IE"] }
+        ],
+        "rollout": {
+          "weights": { "on": 1000, "off": 9000 },
+          "bucket_by": "account_id"
+        }
+      }
+    ]
+  },
+  {
+    "key": "search-backend",
+    "name": "Search backend",
+    "description": "Which search implementation to use. A string flag, not a bool, so a third option does not need a second flag.",
+    "kind": "string",
+    "enabled": true,
+    "variations": [
+      { "key": "legacy", "value": "postgres-ilike" },
+      { "key": "elastic", "value": "elasticsearch" },
+      { "key": "vector", "value": "pgvector" }
+    ],
+    "default_variation": "legacy",
+    "off_variation": "legacy",
+    "rules": [
+      {
+        "id": "experiment",
+        "description": "Even three-way split for the search experiment",
+        "conditions": [{ "attribute": "key", "operator": "exists" }],
+        "rollout": {
+          "weights": { "legacy": 3334, "elastic": 3333, "vector": 3333 }
+        }
+      }
+    ]
+  },
+  {
+    "key": "rate-limit-rps",
+    "name": "API rate limit",
+    "description": "Requests per second. An int flag lets this be tuned during an incident without a deploy.",
+    "kind": "int",
+    "enabled": true,
+    "variations": [
+      { "key": "normal", "value": 100 },
+      { "key": "degraded", "value": 10 },
+      { "key": "generous", "value": 1000 }
+    ],
+    "default_variation": "normal",
+    "off_variation": "normal",
+    "rules": [
+      {
+        "id": "paid-plans",
+        "conditions": [
+          { "attribute": "plan", "operator": "in", "values": ["pro", "enterprise"] }
+        ],
+        "variation": "generous"
+      }
+    ]
+  },
+  {
+    "key": "retry-policy",
+    "name": "Retry policy",
+    "description": "A JSON flag, for configuration that belongs together.",
+    "kind": "json",
+    "enabled": true,
+    "variations": [
+      {
+        "key": "default",
+        "value": { "attempts": 3, "base_backoff_ms": 50, "max_backoff_ms": 1000 }
+      },
+      {
+        "key": "aggressive",
+        "value": { "attempts": 6, "base_backoff_ms": 20, "max_backoff_ms": 500 }
+      }
+    ],
+    "default_variation": "default",
+    "off_variation": "default"
+  },
+  {
+    "key": "mobile-paywall",
+    "name": "Mobile paywall",
+    "description": "Only for app versions that can render it. Semver comparison is numeric, so 1.10 is newer than 1.9.",
+    "kind": "bool",
+    "enabled": true,
+    "variations": [
+      { "key": "on", "value": true },
+      { "key": "off", "value": false }
+    ],
+    "default_variation": "off",
+    "off_variation": "off",
+    "rules": [
+      {
+        "id": "supported-versions",
+        "conditions": [
+          { "attribute": "app_version", "operator": "semver_gte", "values": ["1.10.0"] },
+          { "attribute": "platform", "operator": "in", "values": ["ios", "android"] }
+        ],
+        "rollout": { "weights": { "on": 2500, "off": 7500 } }
+      }
+    ]
+  }
+]

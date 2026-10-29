@@ -1,0 +1,236 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.24', '1.25']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: Verify formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed on:"; echo "$unformatted"; exit 1
+          fi
+
+      - run: go vet ./...
+      - run: go build ./...
+
+      # The SDK swaps an atomic snapshot pointer while readers evaluate, and
+      # the store fans out change notifications, so the race detector is doing
+      # real work here.
+      - name: Test (race)
+        env:
+          CGO_ENABLED: 1   # the race detector needs cgo
+        run: go test -race -count=1 ./...
+
+  determinism:
+    name: bucketing is deterministic and well distributed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+      # These are the properties an SDK in another language would have to
+      # match, so they are worth running on their own with extra repetitions:
+      # a change to the hash silently reshuffles every live rollout.
+      - name: Repeat the bucketing and distribution tests
+        run: go test -count=3 -run 'Bucket|Rollout' ./internal/eval/...
+
+  e2e:
+    name: the daemon serves, evaluates and streams
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+      - run: go build -o flagd ./cmd/flagd
+
+      - name: Start flagd with the example flags
+        env:
+          FLAGD_ADMIN_TOKEN: ci-admin-token-at-least-16
+          FLAGD_SDK_TOKEN: ci-sdk-token-at-least-16x
+        run: |
+          ./flagd -seed flags.example.json -addr :8080 &
+          echo $! > flagd.pid
+          for i in $(seq 1 30); do
+            curl -fsS localhost:8080/healthz >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS localhost:8080/readyz
+
+      # The shipped example is documentation people copy, so a schema change
+      # that breaks it should fail here.
+      - name: The example flags all loaded
+        run: |
+          count=$(curl -fsS -H "Authorization: Bearer ci-sdk-token-at-least-16x" \
+            localhost:8080/api/v1/flags | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["flags"]))')
+          echo "loaded $count flags"
+          [ "$count" -eq 5 ] || { echo "::error::expected 5 example flags, got $count"; exit 1; }
+
+      - name: Rule targeting and rollouts behave as documented
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request
+
+          def evaluate(key, ctx):
+              req = urllib.request.Request(
+                  "http://localhost:8080/api/v1/evaluate",
+                  data=json.dumps({"flag_key": key, "context": ctx}).encode(),
+                  headers={"Authorization": "Bearer ci-sdk-token-at-least-16x",
+                           "Content-Type": "application/json"})
+              return json.load(urllib.request.urlopen(req))
+
+          # A staff email hits the internal-staff rule.
+          r = evaluate("new-checkout", {"key": "u1", "attributes": {"email": "sam@acme.com"}})
+          assert r["reason"] == "rule_match" and r["rule_id"] == "internal-staff", r
+          assert r["value"] is True, r
+
+          # Someone outside the rules gets the default.
+          r = evaluate("new-checkout", {"key": "u2", "attributes": {"email": "x@other.com"}})
+          assert r["reason"] == "default" and r["value"] is False, r
+
+          # A rollout reports the bucket, and is stable for one subject.
+          first = evaluate("search-backend", {"key": "user-99"})
+          assert first["reason"] == "rollout", first
+          assert 0 <= first["bucket"] < 10000, first
+          for _ in range(20):
+              again = evaluate("search-backend", {"key": "user-99"})
+              assert again["variation"] == first["variation"], (first, again)
+
+          # Semver compares numerically: 1.10 is newer than 1.9.
+          new = evaluate("mobile-paywall", {"key": "u", "attributes":
+                 {"app_version": "1.10.0", "platform": "ios"}})
+          old = evaluate("mobile-paywall", {"key": "u", "attributes":
+                 {"app_version": "1.9.0", "platform": "ios"}})
+          assert new["reason"] == "rollout", new
+          assert old["reason"] == "default", old
+
+          # An unknown flag is a 200 with the fallback, not an error.
+          r = evaluate("no-such-flag", {"key": "u"})
+          assert r["reason"] == "flag_not_found", r
+
+          print("ok: targeting, rollouts, semver and fallbacks all behave as documented")
+          PY
+
+      - name: An SDK token may not mutate flags
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ci-sdk-token-at-least-16x" \
+            -H 'Content-Type: application/json' \
+            -d '{"key":"sneaky","kind":"bool","enabled":true,"variations":[{"key":"on","value":true}],"default_variation":"on","off_variation":"on"}' \
+            localhost:8080/api/v1/flags)
+          [ "$code" = "403" ] || { echo "::error::SDK token got $code, want 403"; exit 1; }
+          echo "ok: read-only token cannot write"
+
+      - name: The stream pushes a change
+        run: |
+          timeout 20 curl -sN -H "Authorization: Bearer ci-sdk-token-at-least-16x" \
+            localhost:8080/api/v1/stream > stream.log &
+          sleep 2
+          curl -fsS -X PUT -H "Authorization: Bearer ci-admin-token-at-least-16" \
+            -H 'Content-Type: application/json' \
+            -d '{"key":"new-checkout","kind":"bool","enabled":false,"variations":[{"key":"on","value":true},{"key":"off","value":false}],"default_variation":"off","off_variation":"off","comment":"ci toggle"}' \
+            localhost:8080/api/v1/flags/new-checkout >/dev/null
+          sleep 2
+          events=$(grep -c '^data:' stream.log || true)
+          echo "received $events stream event(s)"
+          # One for the initial state, one for the change: a client must be
+          # correct from the first byte, not only after something is edited.
+          [ "$events" -ge 2 ] || { echo "::error::expected at least 2 events"; cat stream.log; exit 1; }
+
+      - name: The audit log records the change
+        run: |
+          curl -fsS -H "Authorization: Bearer ci-sdk-token-at-least-16x" \
+            localhost:8080/api/v1/flags/new-checkout/history | python3 -c '
+          import json,sys
+          changes = json.load(sys.stdin)["changes"]
+          assert changes, "no audit records"
+          latest = changes[0]
+          assert latest["action"] == "disable", latest
+          assert latest["actor"] == "admin", latest
+          assert latest["comment"] == "ci toggle", latest
+          print("ok: audit recorded", latest["action"], "by", latest["actor"])
+          '
+
+      - name: The dashboard renders
+        run: |
+          curl -fsS localhost:8080/ | grep -q 'new-checkout' \
+            || { echo "::error::dashboard did not render the flag list"; exit 1; }
+          curl -fsS localhost:8080/flags/new-checkout | grep -q 'Variations' \
+            || { echo "::error::flag detail page did not render"; exit 1; }
+          echo "ok: dashboard renders"
+
+      - name: Stop flagd
+        if: always()
+        run: kill "$(cat flagd.pid)" 2>/dev/null || true
+
+  docker:
+    name: image builds and serves
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: feature-flags:ci
+      - name: Run the container
+        run: |
+          docker run -d --name ff -p 8080:8080 \
+            -e FLAGD_ADMIN_TOKEN=ci-admin-token-at-least-16 \
+            feature-flags:ci -seed /etc/flagd/flags.example.json
+          for i in $(seq 1 30); do
+            curl -fsS localhost:8080/healthz >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS localhost:8080/readyz
+          curl -fsS -H "Authorization: Bearer ci-admin-token-at-least-16" \
+            localhost:8080/api/v1/flags >/dev/null
+          echo "ok"
+      - name: Logs on failure
+        if: failure()
+        run: docker logs ff
+      - name: Tear down
+        if: always()
+        run: docker rm -f ff || true
+
+  tidy:
+    name: go.mod is tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+      - run: go mod tidy
+      - run: git diff --exit-code go.mod
